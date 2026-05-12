@@ -24,7 +24,11 @@ Main parameters in `main.py`:
 - `input_type`: wordform or sentence
 - `corpus`: dataset name (e.g. BDT, PUD)
 
+
+## Citation
 If you use the data in your work, please refer to our paper:
+
+```
 @inproceedings{toporkov-etal-2025-lemma,
     title = "Lemma Dilemma: On Lemma Generation Without Domain- or Language-Specific Training Data",
     author = "Toporkov, Olia  and
@@ -44,3 +48,4 @@ If you use the data in your work, please refer to our paper:
     pages = "18219--18232",
     ISBN = "979-8-89176-335-7",
 }
+```
