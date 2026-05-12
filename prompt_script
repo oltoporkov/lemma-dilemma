@@ -1,0 +1,178 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from gradio_client import Client
+import os
+from datetime import datetime
+
+start_time = datetime.now()
+
+instructions = ("Instructions:\n"
+            "1. Copy the word exactly as it is, and provide its lemma.\n"
+            "2. **Process Every Word**: Lemmatize **each word** in the sentence. Do not omit, change, or remove any word.\n"
+            "3. **Handle Spelling Errors**: If a word is misspelled, retain the original spelling as the initial word, but lemmatize it to the closest dictionary form.\n"
+            "4. **Proper Nouns**: Proper nouns should retain their capitalization.\n"
+            "5. **Punctuation**: Include punctuation marks in the output, using the mark itself as the lemma.\n"
+            "6. **Part-of-Speech**: Lemmatize words based on their part of speech (POS) (e.g., verbs to their infinitive form, nouns to singular form).\n"
+            "7. **Articles**: Use the masculine singular form for articles.\n"
+            "8. **Multi-Word Expressions**: If an input contains multiple words, process each word separately.\n"
+        )
+
+##function that calls the examples with the lowest number of correctly lemmatized words, where the input to the system was made in the format of the list of words
+def bad_examples_for_few_shot_wordform(language_folder, language, prompt_type, input_type):
+    """
+    function that allows to obtain the examples with the most errors from the development set 
+    """
+    list_wordforms = []
+    list_full_example = []
+    aux_wf = []
+    aux_fe = []
+
+    with open('examples_file.tsv', 'r', encoding='utf8') as f_examples:
+        for line in f_examples:
+            line = line.strip()
+
+            if line:
+                word = line.split('\t')[0]
+                aux_wf.append(word)
+                aux_fe.append(line)
+            else:
+                if aux_wf:
+                    list_wordforms.append('\n'.join(aux_wf))
+                    list_full_example.append('\n'.join(aux_fe))
+                    aux_wf = []
+                    aux_fe = []
+
+        # catch last block (important fix if file doesn't end with newline)
+        if aux_wf:
+            list_wordforms.append('\n'.join(aux_wf))
+            list_full_example.append('\n'.join(aux_fe))
+
+    return list_wordforms, list_full_example
+
+##function that calls the examples with the lowest number of correctly lemmatized words, where the input to the system was made in the format of the sentence
+def bad_examples_for_few_shot_sentence(folder, language, prompt_type, input_type):
+    list_sentence = []
+    list_full_example = []
+    aux_fe = []
+    aux_wf_str = []
+
+    with open('examples_file.tsv', 'r', encoding='utf8') as f_examples:
+        for line in f_examples:
+            line = line.strip()
+
+            if line:
+                aux_wf_str.append(line.split('\t')[0])
+                aux_fe.append(line)
+            else:
+                if aux_wf_str:
+                    list_sentence.append(' '.join(aux_wf_str))
+                    list_full_example.append('\n'.join(aux_fe))
+                    aux_wf_str = []
+                    aux_fe = []
+
+        # catch last block
+        if aux_wf_str:
+            list_sentence.append(' '.join(aux_wf_str))
+            list_full_example.append('\n'.join(aux_fe))
+
+    return list_sentence, list_full_example
+
+#number of shots
+shots = {
+    '1_shot': 1,
+    '2_shot': 2,
+    '3_shot': 3,
+    '4_shot': 4,
+    '5_shot': 5
+}
+
+def _build_prompt(language, sentence_batch, examples, include_instructions=False):
+    prompt = (
+        f"Your task is to lemmatize a sentence in {language}. You will be given a sentence, where each word starts from the new line. "
+        "You need to provide for each word in the given sentence its dictionary form (lemma).\n"
+    )
+    for ex in examples:
+        prompt += (
+            "For example, for the sentence:\n"
+            f"{ex[0]}\n"
+            "The desired output is:\n"
+            f"{ex[1]}\n"
+        )
+    if include_instructions:
+        prompt += instructions
+    prompt += (
+        "Provide the output in **TSV format** (Tab-Separated Values) with the format:\n"
+        "`initial word    lemma`\n"
+        f"Sentence:\n{sentence_batch}\n\n"
+        "Answer with the required output only, without extra spaces, quotation marks, or comments.\n"
+    )
+    return prompt
+
+##basic prompt - only the task + examples, input as a list of words
+def basic_prompt_function_wordform(folder, sentence_batch, language, prompt_type, input_type, shots=1):
+    sentences, lemmatized_examples = bad_examples_for_few_shot_wordform(folder, language, prompt_type, input_type)
+    examples = [(sentences[i], lemmatized_examples[i]) for i in range(shots)]
+    return _build_prompt(folder, sentence_batch, examples, include_instructions=False)
+
+##basic prompt - only the task + examples, input as a whole sentence
+def basic_prompt_function_sentence(folder, sentence_batch, language, prompt_type, input_type, shots=1):
+    sentences, lemmatized_examples = bad_examples_for_few_shot_sentence(folder, language, prompt_type, input_type)
+    examples = [(sentences[i], lemmatized_examples[i]) for i in range(min(shots, len(sentences)))]
+    return _build_prompt(folder, sentence_batch, examples, include_instructions=False)
+
+#full prompt - basic task + instructions, input as a list of words
+def full_prompt_function_wordform(folder, sentence_batch, language, prompt_type, input_type, shots):
+    sentences, lemmatized_examples = bad_examples_for_few_shot_wordform(folder, language, prompt_type, input_type)
+    examples = [(sentences[i], lemmatized_examples[i]) for i in range(shots)]
+    return _build_prompt(folder, sentence_batch, examples, include_instructions=True)
+
+#full prompt - basic task + instructions, input as a sentence
+def full_prompt_sentence(folder, sentence_batch, language, prompt_type, input_type, shots):
+    sentences, outputs = bad_examples_for_few_shot_sentence(folder, language, prompt_type, input_type)
+    examples = [(sentences[i], outputs[i]) for i in range(shots)]
+    return _build_prompt(folder, sentence_batch, examples, include_instructions=True)
+
+
+def sentence_input(sentence_file):
+    return [line.strip() for line in sentence_file]
+
+def wordform_input(sentence_file):
+    return [line.strip().split(' ') for line in sentence_file]
+
+def input_file(language, folder, corpus, file_type, file_extension):
+    path = f'./{folder}/{language}_{corpus}_target_{file_type}{file_extension}'
+    if corpus != 'PUD' and file_type != 'OOD_test':
+        path = 'path_to_input_file'
+    with open(path, 'r', encoding='utf8') as f:
+        return f.readlines()
+
+def save_predictions(language, folder, corpus, file_type, prompt_type, results):
+    prediction_directory = os.path.join(f'./{folder}/predictions_modelname')
+    os.makedirs(prediction_directory, exist_ok=True)
+    file_path = os.path.join(prediction_directory, f'predictions_modelname_{language}_{corpus}_{file_type}_{prompt_type}.tsv')
+    with open(file_path, 'w', encoding='utf8') as f:
+        for line in results:
+            f.write("%s\n\n" % line.strip(' '))
+
+##writing predictions one by one
+def saving_predictions_gradually(language, folder, corpus, file_type, prompt_type, results_unit, input_type):
+    prediction_directory = os.path.join(f'./{folder}/predictions_modelname')
+    os.makedirs(prediction_directory, exist_ok=True)
+    example_type = 'errored_examples'
+    shots = '4_shot'
+    file_path = os.path.join(prediction_directory, f'predictions_modelname_{language}_{corpus}_{file_type}_{prompt_type}_{shots}_{input_type}_{example_type}.tsv')
+    with open(file_path, 'a', encoding='utf8') as f:
+        f.write("%s\n\n" % results_unit.strip(' '))
+
+
+def save_prompt(folder, prompt, prompt_type):
+    example_type = 'worst_examples'
+    prediction_directory = f'./{folder}'
+    file_path = os.path.join(prediction_directory, f'{prompt_type}_{example_type}.tsv')
+    with open(file_path, 'w', encoding='utf8') as f2:
+        f2.write("%s\n" % prompt)
+
+
+end_time = datetime.now()
+print('Duration: {}'.format(end_time - start_time))
