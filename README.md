@@ -15,7 +15,7 @@ word \t lemma
 Each sentence is separated by a blank line.
 
 ## Configuration
-Main parameters in `main.py`:
+Main parameters in `prompt_script.py`:
 
 - `prompt_type`: basic_prompt or full_prompt, where:
     basic prompt is an instruction to perform lemmatization, without any further explanation;
